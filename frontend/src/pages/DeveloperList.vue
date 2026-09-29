@@ -5,7 +5,8 @@ import DilutionInput from '../components/common/DilutionInput.vue'
 import StatBadge from '../components/common/StatBadge.vue'
 import { useDeveloperStore } from '../stores/developerStore'
 import type { Developer, DeveloperCategory, DeveloperState, Dilution } from '../types/developer'
-import { calculateStockVolume, remainingRolls } from '../utils/ratio'
+import { calculateStockVolume } from '../utils/ratio'
+import { isDeveloperExhausted } from '../utils/ledger'
 
 interface DeveloperForm {
   name: string
@@ -14,7 +15,7 @@ interface DeveloperForm {
   volumeMl: number
   mixedAt: string
   maxRolls: number
-  usedRolls: number
+  openingUsed: number
   state: DeveloperState
 }
 
@@ -28,14 +29,23 @@ const form = reactive<DeveloperForm>({
   volumeMl: 1000,
   mixedAt: new Date().toISOString().slice(0, 10),
   maxRolls: 12,
-  usedRolls: 0,
+  openingUsed: 0,
   state: '新配'
 })
 
 function stateTone(developer: Developer): 'cyan' | 'amber' | 'rose' {
-  if (developer.state === '报废') return 'rose'
+  if (isDeveloperExhausted(developer, developerStore.usages)) return 'rose'
   if (developer.state === '新配') return 'cyan'
   return 'amber'
+}
+
+function displayState(developer: Developer): string {
+  if (developer.state === '报废') return '报废'
+  if (developer.id !== undefined
+    && developerStore.usedByDeveloper(developer.id) >= developer.maxRolls) {
+    return '余量耗尽'
+  }
+  return developer.state
 }
 
 async function submitDeveloper(): Promise<void> {
@@ -50,13 +60,13 @@ async function submitDeveloper(): Promise<void> {
       name: form.name.trim(),
       volumeMl: Math.max(0, form.volumeMl),
       maxRolls: Math.max(1, form.maxRolls),
-      usedRolls: Math.max(0, form.usedRolls)
+      openingUsed: Math.max(0, form.openingUsed)
     })
-    ElMessage.success('显影液工作液已登记')
+    ElMessage.success('显影液工作液已登记，期初用量已写入耗药账本')
     form.name = ''
     form.mixedAt = new Date().toISOString().slice(0, 10)
     form.maxRolls = 12
-    form.usedRolls = 0
+    form.openingUsed = 0
     form.state = '新配'
     showForm.value = false
   } finally {
@@ -90,8 +100,8 @@ onMounted(() => {
 
     <div class="stat-strip">
       <StatBadge label="工作液总数" :value="developerStore.developers.length" hint="含新配与报废记录" tone="cyan" />
-      <StatBadge label="可用余量" :value="developerStore.availableRolls" hint="按剩余可冲卷数合计" tone="amber" />
-      <StatBadge label="已报废" :value="developerStore.developers.filter((item) => item.state === '报废').length" hint="不再计入可用余量" tone="rose" />
+      <StatBadge label="可用余量" :value="developerStore.availableRolls" hint="按耗药流水汇总的剩余可冲卷数" tone="amber" />
+      <StatBadge label="已报废 / 耗尽" :value="developerStore.exhaustedCount" hint="手工报废或账本汇总余量归零" tone="rose" />
     </div>
 
     <form v-if="showForm" class="inline-form" data-testid="form-developer" @submit.prevent="submitDeveloper">
@@ -140,8 +150,8 @@ onMounted(() => {
           <input v-model.number="form.maxRolls" data-testid="field-maxRolls" type="number" min="1" max="100" />
         </label>
         <label>
-          <span>已冲卷数</span>
-          <input v-model.number="form.usedRolls" data-testid="field-usedRolls" type="number" min="0" max="100" />
+          <span>期初已冲卷数</span>
+          <input v-model.number="form.openingUsed" data-testid="field-openingUsed" type="number" min="0" max="100" />
         </label>
       </div>
       <div class="form-actions">
@@ -167,7 +177,7 @@ onMounted(() => {
         <div class="entity-card__main">
           <div class="entity-card__title">
             <div>
-              <span class="status-chip" :class="`status--${stateTone(developer)}`">{{ developer.state }}</span>
+              <span class="status-chip" :class="`status--${stateTone(developer)}`">{{ displayState(developer) }}</span>
               <h2>{{ developer.name }}</h2>
             </div>
             <button
@@ -187,13 +197,15 @@ onMounted(() => {
           </dl>
           <div class="life-meter">
             <div class="life-meter__head">
-              <span>剩余 {{ remainingRolls(developer.maxRolls, developer.usedRolls) }} 卷</span>
-              <span>已用 {{ developer.usedRolls }} / {{ developer.maxRolls }}</span>
+              <span>剩余 {{ developer.id === undefined ? 0 : developerStore.remainingByDeveloper(developer.id) }} 卷</span>
+              <span>账本已用 {{ developer.id === undefined ? 0 : developerStore.usedByDeveloper(developer.id) }} / {{ developer.maxRolls }}</span>
             </div>
             <div class="life-meter__track">
-              <i :style="{ width: `${Math.min(100, developer.usedRolls / developer.maxRolls * 100)}%` }"></i>
+              <i :style="{ width: `${Math.min(100, (developer.id === undefined ? 0 : developerStore.usedByDeveloper(developer.id)) / developer.maxRolls * 100)}%` }"></i>
             </div>
-            <small v-if="remainingRolls(developer.maxRolls, developer.usedRolls) === 0">余量已耗尽，建议报废并重新配制。</small>
+            <small v-if="isDeveloperExhausted(developer, developerStore.usages)">
+              账本汇总显示余量已耗尽（或已手工报废），不再计入可冲余量。
+            </small>
           </div>
         </div>
       </article>

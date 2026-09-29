@@ -10,7 +10,11 @@ export interface Developer {
   volumeMl: number
   mixedAt: string
   maxRolls: number
-  usedRolls: number
   state: DeveloperState
   schemaRev?: number
+}
+
+// 新建工作液时可登记一个期初已冲卷数（会写成 open 流水），之后一律看账本
+export type NewDeveloper = Omit<Developer, 'id' | 'schemaRev'> & {
+  openingUsed?: number
 }

@@ -387,6 +387,34 @@ main {
   font-size: 11px;
 }
 
+.simple-stat--toggle {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.simple-stat--toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #8a5a34;
+}
+
+.simple-stat--toggle span {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.run-card--revoked {
+  opacity: 0.62;
+  background: rgba(245, 239, 231, 0.85);
+}
+
+.run-card--revoked .run-card__date {
+  background: linear-gradient(160deg, rgba(120, 110, 100, 0.8), rgba(80, 72, 66, 0.92)), #5a524b;
+}
+
 .panel,
 .inline-form,
 .entity-card {
