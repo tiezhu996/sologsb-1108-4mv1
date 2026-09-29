@@ -64,18 +64,26 @@ npm run build
         ├── hooks               # 配方筛选与温度补偿
         ├── pages               # 五个业务页面
         ├── router              # 路由配置
-        ├── stores              # 四类数据的 Pinia 状态与持久化动作
-        ├── types               # 胶片、显影液、配方、冲洗记录模型
+        ├── stores              # 胶片、显影液、配方、冲洗记录与耗药流水的 Pinia 状态
+        ├── types               # 胶片、显影液、配方、冲洗记录、耗药流水模型
         └── utils               # Dexie 数据层、比例换算、JSON 导出
 ```
 
 ## 数据存储说明
 
 - IndexedDB 数据库名：`gbfilmdev-db`
-- Dexie 版本：`version(1)` 创建 `films`、`developers`、`recipes`、`runs` 四张表并建立常用查询索引。
-- 迁移：`version(2).upgrade(...)` 为已有记录回填 `schemaRev: 2`。首次打开数据库时通过 `populate` 写入丰富的胶片、显影液、配方和实冲记录。
-- 数据保存在当前浏览器，不随容器重建而丢失；更换浏览器或清理站点数据前，可在顶部导航点击“导出数据”下载 JSON 备份。
+- Dexie 版本：
+  - `version(1)` 创建 `films`、`developers`、`recipes`、`runs` 四张表并建立常用查询索引。
+  - `version(2).upgrade(...)` 为已有记录回填 `schemaRev: 2`。
+  - `version(3)` 新增可撤销的**耗药流水账本** `usages`（索引：`developerId / runId / kind / status / consumedAt`），并为 `runs` 增加 `developerId` 索引。升级时自动为每条旧实冲批次补一条 `batch` 流水（同时在批次上锁定显影液快照），旧 `usedRolls` 计数器中无法对应批次的余量补为一条 `opening` 期初流水，保证升级前后用量一致。
+- 耗药账本规则：
+  - 登记实冲时，批次（含配方与所用显影液快照）与一条 `active` 耗药流水在同一个 Dexie 读写事务内写入；任一步失败整笔回滚，不会留下半条记录。
+  - 在冲洗记录页撤销批次时，只把该批次对应的流水置为 `reversed`（保留冲销时间与原因）并删除批次；其他批次流水不受影响，工作液剩余次数由账本汇总自动还原。
+  - 显影液页的已用量、可冲余量与报废提示全部以 `active` 流水汇总为准，不再读取旧版 `usedRolls` 计数器。
+- 首次打开数据库时通过 `populate` 写入胶片、显影液、配方、实冲记录及配套耗药流水。
+- 数据保存在当前浏览器，不随容器重建而丢失；更换浏览器或清理站点数据前，可在顶部导航点击“导出数据”下载 JSON 备份（含耗药流水）。
 - 所有新增和更新动作在写入 Dexie 前均会去除响应式代理，避免 `DataCloneError`。
+- 账本逻辑可执行 `cd frontend && npm run verify:ledger` 验证（基于 fake-indexeddb，覆盖种子账本、v2→v3 升级补齐、登记/撤销与事务回滚）。
 
 ## 核心功能与路由表
 

@@ -8,11 +8,13 @@ import { useDeveloperStore } from '../stores/developerStore'
 import { useFilmStore } from '../stores/filmStore'
 import { useRecipeStore } from '../stores/recipeStore'
 import { useRunStore } from '../stores/runStore'
+import { useUsageStore } from '../stores/usageStore'
 
 const filmStore = useFilmStore()
 const developerStore = useDeveloperStore()
 const recipeStore = useRecipeStore()
 const runStore = useRunStore()
+const usageStore = useUsageStore()
 const { filmId, dilution, pushPull, filteredRecipes, resetFilters } = useRecipeFilter()
 const selectedTemp = ref(20)
 
@@ -45,7 +47,8 @@ onMounted(async () => {
     filmStore.load(),
     developerStore.load(),
     recipeStore.load(),
-    runStore.load()
+    runStore.load(),
+    usageStore.load()
   ])
 })
 </script>

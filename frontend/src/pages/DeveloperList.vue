@@ -4,8 +4,9 @@ import { ElMessage } from 'element-plus'
 import DilutionInput from '../components/common/DilutionInput.vue'
 import StatBadge from '../components/common/StatBadge.vue'
 import { useDeveloperStore } from '../stores/developerStore'
+import { useUsageStore } from '../stores/usageStore'
 import type { Developer, DeveloperCategory, DeveloperState, Dilution } from '../types/developer'
-import { calculateStockVolume, remainingRolls } from '../utils/ratio'
+import { calculateStockVolume } from '../utils/ratio'
 
 interface DeveloperForm {
   name: string
@@ -14,11 +15,11 @@ interface DeveloperForm {
   volumeMl: number
   mixedAt: string
   maxRolls: number
-  usedRolls: number
   state: DeveloperState
 }
 
 const developerStore = useDeveloperStore()
+const usageStore = useUsageStore()
 const showForm = ref(false)
 const saving = ref(false)
 const form = reactive<DeveloperForm>({
@@ -28,7 +29,6 @@ const form = reactive<DeveloperForm>({
   volumeMl: 1000,
   mixedAt: new Date().toISOString().slice(0, 10),
   maxRolls: 12,
-  usedRolls: 0,
   state: '新配'
 })
 
@@ -36,6 +36,14 @@ function stateTone(developer: Developer): 'cyan' | 'amber' | 'rose' {
   if (developer.state === '报废') return 'rose'
   if (developer.state === '新配') return 'cyan'
   return 'amber'
+}
+
+function usedRollsOf(developer: Developer): number {
+  return developer.id === undefined ? 0 : usageStore.usedRollsFor(developer.id)
+}
+
+function remainingOf(developer: Developer): number {
+  return developer.id === undefined ? 0 : developerStore.remainingFor(developer.id)
 }
 
 async function submitDeveloper(): Promise<void> {
@@ -49,14 +57,12 @@ async function submitDeveloper(): Promise<void> {
       ...form,
       name: form.name.trim(),
       volumeMl: Math.max(0, form.volumeMl),
-      maxRolls: Math.max(1, form.maxRolls),
-      usedRolls: Math.max(0, form.usedRolls)
+      maxRolls: Math.max(1, form.maxRolls)
     })
     ElMessage.success('显影液工作液已登记')
     form.name = ''
     form.mixedAt = new Date().toISOString().slice(0, 10)
     form.maxRolls = 12
-    form.usedRolls = 0
     form.state = '新配'
     showForm.value = false
   } finally {
@@ -70,8 +76,8 @@ async function scrapDeveloper(id?: number): Promise<void> {
   ElMessage.success('该工作液已标记为报废')
 }
 
-onMounted(() => {
-  void developerStore.load()
+onMounted(async () => {
+  await Promise.all([developerStore.load(), usageStore.load()])
 })
 </script>
 
@@ -139,10 +145,6 @@ onMounted(() => {
           <span>可冲上限</span>
           <input v-model.number="form.maxRolls" data-testid="field-maxRolls" type="number" min="1" max="100" />
         </label>
-        <label>
-          <span>已冲卷数</span>
-          <input v-model.number="form.usedRolls" data-testid="field-usedRolls" type="number" min="0" max="100" />
-        </label>
       </div>
       <div class="form-actions">
         <button type="button" class="ghost-button" @click="showForm = false">取消</button>
@@ -187,13 +189,13 @@ onMounted(() => {
           </dl>
           <div class="life-meter">
             <div class="life-meter__head">
-              <span>剩余 {{ remainingRolls(developer.maxRolls, developer.usedRolls) }} 卷</span>
-              <span>已用 {{ developer.usedRolls }} / {{ developer.maxRolls }}</span>
+              <span>剩余 {{ remainingOf(developer) }} 卷</span>
+              <span>已用 {{ usedRollsOf(developer) }} / {{ developer.maxRolls }}</span>
             </div>
             <div class="life-meter__track">
-              <i :style="{ width: `${Math.min(100, developer.usedRolls / developer.maxRolls * 100)}%` }"></i>
+              <i :style="{ width: `${Math.min(100, usedRollsOf(developer) / developer.maxRolls * 100)}%` }"></i>
             </div>
-            <small v-if="remainingRolls(developer.maxRolls, developer.usedRolls) === 0">余量已耗尽，建议报废并重新配制。</small>
+            <small v-if="remainingOf(developer) === 0">账本余量已耗尽，建议报废并重新配制。</small>
           </div>
         </div>
       </article>

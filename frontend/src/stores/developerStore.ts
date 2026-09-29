@@ -2,8 +2,9 @@ import { defineStore } from 'pinia'
 import { db, plain } from '../utils/db'
 import type { Developer } from '../types/developer'
 import { remainingRolls } from '../utils/ratio'
+import { useUsageStore } from './usageStore'
 
-type NewDeveloper = Omit<Developer, 'id' | 'schemaRev'>
+type NewDeveloper = Omit<Developer, 'id' | 'schemaRev' | 'usedRolls'>
 
 export const useDeveloperStore = defineStore('developer', {
   state: () => ({
@@ -12,9 +13,22 @@ export const useDeveloperStore = defineStore('developer', {
   }),
   getters: {
     activeDevelopers: (state) => state.developers.filter((developer) => developer.state !== '报废'),
+    /** 工作液当前已冲卷数：只认耗药账本里的有效流水 */
+    usedRollsFor(): (developerId: number) => number {
+      const usageStore = useUsageStore()
+      return (developerId: number) => usageStore.usedRollsFor(developerId)
+    },
+    remainingFor(): (developerId: number) => number {
+      const developerById = new Map(this.developers.map((developer) => [developer.id, developer]))
+      return (developerId: number) => {
+        const developer = developerById.get(developerId)
+        if (!developer) return 0
+        return remainingRolls(developer.maxRolls, this.usedRollsFor(developerId))
+      }
+    },
     availableRolls(): number {
       return this.activeDevelopers.reduce(
-        (sum, developer) => sum + remainingRolls(developer.maxRolls, developer.usedRolls),
+        (sum, developer) => sum + (developer.id === undefined ? 0 : this.remainingFor(developer.id)),
         0
       )
     }
@@ -29,17 +43,10 @@ export const useDeveloperStore = defineStore('developer', {
       }
     },
     async addDeveloper(payload: NewDeveloper): Promise<number> {
-      const next = { ...payload, schemaRev: 2 }
+      const next = { ...payload, schemaRev: 3 }
       const id = await db.developers.add(plain(next))
       await this.load()
       return id
-    },
-    async incrementUsed(id: number): Promise<void> {
-      const developer = await db.developers.get(id)
-      if (!developer) return
-      const usedRolls = developer.usedRolls + 1
-      await db.developers.update(id, plain({ usedRolls }))
-      await this.load()
     },
     async scrap(id: number): Promise<void> {
       await db.developers.update(id, plain({ state: '报废' }))

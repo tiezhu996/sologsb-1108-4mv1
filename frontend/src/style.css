@@ -961,6 +961,12 @@ td em {
   font-size: 11px;
 }
 
+.run-card__actions {
+  display: inline-flex;
+  gap: 14px;
+  align-items: center;
+}
+
 .compensation-callout {
   display: flex;
   justify-content: space-between;

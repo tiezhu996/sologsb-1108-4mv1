@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
 import EmptyPanel from '../components/common/EmptyPanel.vue'
 import FilterBar from '../components/common/FilterBar.vue'
@@ -10,6 +10,7 @@ import { useDeveloperStore } from '../stores/developerStore'
 import { useFilmStore } from '../stores/filmStore'
 import { useRecipeStore } from '../stores/recipeStore'
 import { useRunStore } from '../stores/runStore'
+import { useUsageStore } from '../stores/usageStore'
 import type { TankType } from '../types/dev-run'
 
 interface FilterValue {
@@ -32,6 +33,7 @@ const filmStore = useFilmStore()
 const developerStore = useDeveloperStore()
 const recipeStore = useRecipeStore()
 const runStore = useRunStore()
+const usageStore = useUsageStore()
 const showForm = ref(false)
 const saving = ref(false)
 const today = new Date().toISOString().slice(0, 10)
@@ -111,11 +113,13 @@ async function submitRun(): Promise<void> {
     ElMessage.warning('请填写批次号、配方与结果评价')
     return
   }
-  saving.value = true
-  const selectedDeveloper = developerStore.developers.find((item) => item.id === selectedRecipe.value?.developerId)
+  const selectedDeveloper = developerStore.developers.find(
+    (item) => item.id === selectedRecipe.value?.developerId
+  )
   const willExceedLimit = selectedDeveloper !== undefined
     && selectedDeveloper.state !== '报废'
-    && selectedDeveloper.usedRolls + 1 > selectedDeveloper.maxRolls
+    && developerStore.remainingFor(selectedDeveloper.id ?? -1) <= 0
+  saving.value = true
   try {
     await runStore.addRun({
       batchNo: form.batchNo.trim(),
@@ -126,17 +130,41 @@ async function submitRun(): Promise<void> {
       runDate: form.runDate,
       result: form.result.trim()
     })
-    await Promise.all([developerStore.load(), recipeStore.load()])
+    await Promise.all([developerStore.load(), recipeStore.load(), usageStore.load()])
     if (willExceedLimit) {
-      ElMessage.warning('冲洗记录已保存，本次已超过显影液标称可冲上限，请评估后标记报废')
+      ElMessage.warning('冲洗记录已保存，账本显示该显影液已无可冲余量，请评估后标记报废')
     } else {
-      ElMessage.success('冲洗记录已保存，显影液用量同步更新')
+      ElMessage.success('冲洗记录已保存，耗药流水与显影液余量同步更新')
     }
     form.batchNo = `R-${today.replace(/-/g, '')}-${String(runStore.runs.length + 1).padStart(2, '0')}`
     form.result = ''
     showForm.value = false
+  } catch (error) {
+    // 登记事务已整体回滚，不会留下批次或流水的半条记录
+    ElMessage.error(error instanceof Error ? `登记失败，已全部回滚：${error.message}` : '登记失败，已全部回滚')
   } finally {
     saving.value = false
+  }
+}
+
+async function revokeRun(runId?: number): Promise<void> {
+  if (runId === undefined) return
+  const run = runStore.runs.find((item) => item.id === runId)
+  try {
+    await ElMessageBox.confirm(
+      `撤销后仅冲销批次 ${run?.batchNo ?? ''} 对应的耗药流水，工作液剩余次数将还原；其他批次不受影响。`,
+      '撤销该实冲批次？',
+      { confirmButtonText: '确认撤销', cancelButtonText: '再想想', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await runStore.revokeRun(runId)
+    await Promise.all([runStore.load(), developerStore.load(), usageStore.load()])
+    ElMessage.success('批次已撤销，对应耗药流水已冲销，工作液剩余次数已还原')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? `撤销失败：${error.message}` : '撤销失败')
   }
 }
 
@@ -148,7 +176,7 @@ async function writeBack(recipeId?: number, runId?: number): Promise<void> {
 }
 
 onMounted(async () => {
-  await Promise.all([filmStore.load(), developerStore.load(), recipeStore.load(), runStore.load()])
+  await Promise.all([filmStore.load(), developerStore.load(), recipeStore.load(), runStore.load(), usageStore.load()])
   if (recipeStore.recipes[0]?.id !== undefined) {
     form.recipeId = recipeStore.recipes[0].id
   }
@@ -265,7 +293,17 @@ onMounted(async () => {
           <blockquote>{{ run.result }}</blockquote>
           <div class="run-card__foot">
             <small v-if="recipeForRun(run.recipeId)?.note">配方注释：{{ recipeForRun(run.recipeId)?.note }}</small>
-            <button type="button" class="text-button" @click="writeBack(run.recipeId, run.id)">回写配方注释</button>
+            <span class="run-card__actions">
+              <button type="button" class="text-button" @click="writeBack(run.recipeId, run.id)">回写配方注释</button>
+              <button
+                type="button"
+                class="text-button text-button--danger"
+                data-testid="revoke-run"
+                @click="revokeRun(run.id)"
+              >
+                撤销批次（冲销耗药流水）
+              </button>
+            </span>
           </div>
         </div>
       </article>

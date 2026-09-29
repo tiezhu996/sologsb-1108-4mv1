@@ -3,6 +3,7 @@ import type { FilmStock } from '../types/film-stock'
 import type { Developer } from '../types/developer'
 import type { DevRecipe } from '../types/dev-recipe'
 import type { DevRun } from '../types/dev-run'
+import type { DeveloperUsage } from '../types/developer-usage'
 
 export function plain<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
@@ -36,20 +37,76 @@ const recipeSeeds: DevRecipe[] = [
 ]
 
 const runSeeds: DevRun[] = [
-  { id: 1, batchNo: 'R-260918-01', recipeId: 1, actualTempC: 20.2, actualMinutes: 9.4, tankType: '双联罐', runDate: '2026-09-18', result: '密度均匀，中间调细腻', schemaRev: 2 },
-  { id: 2, batchNo: 'R-260920-02', recipeId: 2, actualTempC: 20.5, actualMinutes: 7.2, tankType: '双联罐', runDate: '2026-09-20', result: '暗部略薄，高光可控', schemaRev: 2 },
-  { id: 3, batchNo: 'R-260921-03', recipeId: 3, actualTempC: 38.1, actualMinutes: 3.25, tankType: '深罐', runDate: '2026-09-21', result: '肤色自然，灰雾轻微', schemaRev: 2 },
-  { id: 4, batchNo: 'R-260922-04', recipeId: 4, actualTempC: 19.8, actualMinutes: 11.2, tankType: '双联罐', runDate: '2026-09-22', result: '反差合适，边缘密度偏高', schemaRev: 2 },
-  { id: 5, batchNo: 'R-260923-05', recipeId: 5, actualTempC: 24.2, actualMinutes: 6.4, tankType: '深罐', runDate: '2026-09-23', result: '高光保留，暗部通透', schemaRev: 2 },
-  { id: 6, batchNo: 'R-260924-06', recipeId: 6, actualTempC: 19.5, actualMinutes: 13.2, tankType: '双联罐', runDate: '2026-09-24', result: '反差稍强，颗粒可接受', schemaRev: 2 },
-  { id: 7, batchNo: 'R-260925-07', recipeId: 7, actualTempC: 20.1, actualMinutes: 12.8, tankType: '双联罐', runDate: '2026-09-25', result: '阴影细节不足，建议延长 0.5 分钟', schemaRev: 2 }
+  { id: 1, batchNo: 'R-260918-01', recipeId: 1, developerId: 1, actualTempC: 20.2, actualMinutes: 9.4, tankType: '双联罐', runDate: '2026-09-18', result: '密度均匀，中间调细腻', schemaRev: 3 },
+  { id: 2, batchNo: 'R-260920-02', recipeId: 2, developerId: 2, actualTempC: 20.5, actualMinutes: 7.2, tankType: '双联罐', runDate: '2026-09-20', result: '暗部略薄，高光可控', schemaRev: 3 },
+  { id: 3, batchNo: 'R-260921-03', recipeId: 3, developerId: 4, actualTempC: 38.1, actualMinutes: 3.25, tankType: '深罐', runDate: '2026-09-21', result: '肤色自然，灰雾轻微', schemaRev: 3 },
+  { id: 4, batchNo: 'R-260922-04', recipeId: 4, developerId: 3, actualTempC: 19.8, actualMinutes: 11.2, tankType: '双联罐', runDate: '2026-09-22', result: '反差合适，边缘密度偏高', schemaRev: 3 },
+  { id: 5, batchNo: 'R-260923-05', recipeId: 5, developerId: 1, actualTempC: 24.2, actualMinutes: 6.4, tankType: '深罐', runDate: '2026-09-23', result: '高光保留，暗部通透', schemaRev: 3 },
+  { id: 6, batchNo: 'R-260924-06', recipeId: 6, developerId: 1, actualTempC: 19.5, actualMinutes: 13.2, tankType: '双联罐', runDate: '2026-09-24', result: '反差稍强，颗粒可接受', schemaRev: 3 },
+  { id: 7, batchNo: 'R-260925-07', recipeId: 7, developerId: 3, actualTempC: 20.1, actualMinutes: 12.8, tankType: '双联罐', runDate: '2026-09-25', result: '阴影细节不足，建议延长 0.5 分钟', schemaRev: 3 }
 ]
+
+// 按时间排序，使自增 id 与消耗先后一致；期初流水排在最前
+function compareConsumedAt(a: DeveloperUsage, b: DeveloperUsage): number {
+  return a.consumedAt.localeCompare(b.consumedAt)
+}
+
+/**
+ * 根据种子批次与旧版计数器生成耗药流水：
+ * 每个批次一条 batch 流水；旧 usedRolls 中超出批次的部分汇总为一条 opening 期初流水。
+ */
+function buildUsageSeeds(
+  runs: DevRun[],
+  recipes: DevRecipe[],
+  developers: Developer[]
+): DeveloperUsage[] {
+  const developerById = new Map(developers.map((developer) => [developer.id, developer]))
+  const developerOfRun = (run: DevRun): number | undefined =>
+    run.developerId ?? recipes.find((recipe) => recipe.id === run.recipeId)?.developerId
+
+  const usages: DeveloperUsage[] = []
+  const runCountByDeveloper = new Map<number, number>()
+
+  runs.forEach((run) => {
+    const developerId = developerOfRun(run)
+    if (developerId === undefined || !developerById.has(developerId)) return
+    runCountByDeveloper.set(developerId, (runCountByDeveloper.get(developerId) ?? 0) + 1)
+    usages.push({
+      developerId,
+      runId: run.id,
+      batchNo: run.batchNo,
+      kind: 'batch',
+      rolls: 1,
+      consumedAt: run.runDate,
+      status: 'active',
+      schemaRev: 3
+    })
+  })
+
+  developers.forEach((developer) => {
+    if (developer.id === undefined) return
+    const legacyUsed = developer.usedRolls ?? 0
+    const openingRolls = Math.max(0, legacyUsed - (runCountByDeveloper.get(developer.id) ?? 0))
+    if (openingRolls <= 0) return
+    usages.push({
+      developerId: developer.id,
+      kind: 'opening',
+      rolls: openingRolls,
+      consumedAt: developer.mixedAt,
+      status: 'active',
+      schemaRev: 3
+    })
+  })
+
+  return usages.sort(compareConsumedAt)
+}
 
 export class FilmDevDatabase extends Dexie {
   films!: Table<FilmStock, number>
   developers!: Table<Developer, number>
   recipes!: Table<DevRecipe, number>
   runs!: Table<DevRun, number>
+  usages!: Table<DeveloperUsage, number>
 
   constructor() {
     super('gbfilmdev-db')
@@ -78,6 +135,79 @@ export class FilmDevDatabase extends Dexie {
         run.schemaRev = 2
       })
     })
+    // 新增耗药流水账本：批次与流水同事务写入，撤销批次只冲销对应流水
+    this.version(3).stores({
+      films: '++id, model, format, expireDate, rollsLeft',
+      developers: '++id, category, state, mixedAt',
+      recipes: '++id, filmId, developerId, dilution, pushPull, tempC',
+      runs: '++id, recipeId, developerId, runDate, tankType',
+      usages: '++id, developerId, runId, kind, status, consumedAt'
+    }).upgrade(async (transaction) => {
+      const recipesTable = transaction.table<DevRecipe, number>('recipes')
+      const runsTable = transaction.table<DevRun, number>('runs')
+      const usagesTable = transaction.table<DeveloperUsage, number>('usages')
+      const developersTable = transaction.table<Developer, number>('developers')
+
+      const recipes = await recipesTable.toArray()
+      const developers = await developersTable.toArray()
+      const developerIds = new Set(developers.map((developer) => developer.id))
+      const existingRunIds = new Set(
+        (await usagesTable.where('kind').equals('batch').toArray())
+          .map((usage) => usage.runId)
+      )
+
+      // 为旧批次补齐：锁定显影液快照，并补一条 active 耗药流水
+      const existingRuns = await runsTable.toArray()
+      const batchUsages: DeveloperUsage[] = []
+      const runCountByDeveloper = new Map<number, number>()
+      const developerOfRun = new Map<number, number | undefined>()
+      existingRuns.forEach((run) => {
+        const developerId = run.developerId ?? recipes.find((recipe) => recipe.id === run.recipeId)?.developerId
+        developerOfRun.set(run.id as number, developerId)
+        if (developerId === undefined || !developerIds.has(developerId)) return
+        // 期初补齐以全部关联批次计数（含可能已存在的流水），保证可重复执行
+        runCountByDeveloper.set(developerId, (runCountByDeveloper.get(developerId) ?? 0) + 1)
+        if (existingRunIds.has(run.id)) return
+        batchUsages.push({
+          developerId,
+          runId: run.id,
+          batchNo: run.batchNo,
+          kind: 'batch',
+          rolls: 1,
+          consumedAt: run.runDate,
+          status: 'active',
+          schemaRev: 3
+        })
+      })
+
+      await runsTable.toCollection().modify((run: DevRun) => {
+        run.developerId = developerOfRun.get(run.id as number)
+        run.schemaRev = 3
+      })
+      if (batchUsages.length > 0) {
+        await usagesTable.bulkAdd(plain(batchUsages.sort(compareConsumedAt)))
+      }
+
+      // 旧计数器里无法对应批次的余量，补为期初流水，保持升级前后用量一致
+      const openingUsages: DeveloperUsage[] = []
+      developers.forEach((developer) => {
+        if (developer.id === undefined) return
+        const legacyUsed = developer.usedRolls ?? 0
+        const openingRolls = Math.max(0, legacyUsed - (runCountByDeveloper.get(developer.id) ?? 0))
+        if (openingRolls <= 0) return
+        openingUsages.push({
+          developerId: developer.id,
+          kind: 'opening',
+          rolls: openingRolls,
+          consumedAt: developer.mixedAt,
+          status: 'active',
+          schemaRev: 3
+        })
+      })
+      if (openingUsages.length > 0) {
+        await usagesTable.bulkAdd(plain(openingUsages.sort(compareConsumedAt)))
+      }
+    })
   }
 }
 
@@ -87,5 +217,6 @@ db.on('populate', () => Promise.all([
   db.films.bulkAdd(plain(filmSeeds)),
   db.developers.bulkAdd(plain(developerSeeds)),
   db.recipes.bulkAdd(plain(recipeSeeds)),
-  db.runs.bulkAdd(plain(runSeeds))
+  db.runs.bulkAdd(plain(runSeeds)),
+  db.usages.bulkAdd(plain(buildUsageSeeds(runSeeds, recipeSeeds, developerSeeds)))
 ]))

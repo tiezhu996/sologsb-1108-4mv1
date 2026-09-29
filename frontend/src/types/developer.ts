@@ -10,7 +10,11 @@ export interface Developer {
   volumeMl: number
   mixedAt: string
   maxRolls: number
-  usedRolls: number
+  /**
+   * @deprecated 旧版手写计数器，自 schemaRev 3 起仅用于升级补齐流水，
+   * 页面用量与余量一律以 usages 账本汇总为准。
+   */
+  usedRolls?: number
   state: DeveloperState
   schemaRev?: number
 }
